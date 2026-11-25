@@ -1,0 +1,24 @@
+[submodule "zeroize"]
+	path = zeroize
+	url = https://github.com/yasec-de/ashen-kexec-zeroizer.git
+	branch = main
+[submodule "ashen-fw"]
+	path = ashen-fw
+	url = https://github.com/yasec-de/ashen-firmware.git
+	branch = main
+[submodule "libkrun"]
+	path = libkrun
+	url = https://github.com/yasec-de/ashen-libkrun.git
+	branch = stable-1.19.x-crash-memaction
+[submodule "crun"]
+	path = crun
+	url = https://github.com/yasec-de/ashen-crun.git
+	branch = main
+[submodule "kvm-hvc-poc"]
+	path = kvm-hvc-poc
+	url = https://codeberg.org/yasec/kvm-qhee-nukinator.git
+	branch = main
+[submodule "arduino-deb-images"]
+	path = arduino-deb-images
+	url = https://github.com/arduino/arduino-deb-images.git
+	branch = arduino
