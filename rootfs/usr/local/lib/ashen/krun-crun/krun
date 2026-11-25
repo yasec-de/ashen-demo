@@ -1,0 +1,3 @@
+#!/bin/bash
+# crun runs the krun handler when invoked as "krun"; it dlopen()s libkrun.so.1 from here.
+LD_LIBRARY_PATH=/usr/local/lib/ashen/krun-crun exec -a krun /usr/local/lib/ashen/krun-crun/crun "$@"

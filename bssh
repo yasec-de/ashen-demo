@@ -1,0 +1,12 @@
+#!/bin/sh
+# ssh to the demo board; BOARD=192.168.1.18 to use Wi-Fi instead of wired.
+# Without BOARD, use wired if it answers, else Wi-Fi.
+DEMO=$(cd "$(dirname "$0")" && pwd)
+. "$DEMO/env.sh"
+if [ -z "$BOARD" ]; then
+	BOARD=192.168.1.17
+	timeout 2 bash -c "exec 3<>/dev/tcp/$BOARD/22" 2>/dev/null || BOARD=192.168.1.18
+fi
+[ "$1" = --host ] && { echo "$BOARD"; exit 0; }
+exec ssh ${ASHEN_SSH_KEY:+-i "$ASHEN_SSH_KEY"} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o ServerAliveInterval=2 -o ServerAliveCountMax=3 \
+	root@"$BOARD" "$@"

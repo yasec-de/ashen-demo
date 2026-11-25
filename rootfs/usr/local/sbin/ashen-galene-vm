@@ -1,0 +1,75 @@
+#!/bin/bash
+# Run the Galene microVM with podman and crun's krun runtime: guest root is the rootfs on the
+# TPM-sealed volume, the guest kernel is the host's, all guest RAM is tagged MADV_CRASH_SECRET
+# (krun.secret_memory; wiped first by the crash payload), and its NIC is a tap on a private
+# /30 behind the board: nftables forwards the board's port 443 to Galene's 8443 in it and
+# masquerades its own traffic. WebRTC media goes through the board's TURN server (ashen-turn.service), whose relay
+# sockets live on the board's LAN address. Guest console lines go to the kernel console.
+set -euo pipefail
+. /usr/local/lib/ashen/common.sh
+
+ROOTFS=${1:-/var/lib/ashen/vol/rootfs}
+TAP=ashen-tap0
+HOST_IP=10.21.0.1
+GUEST_IP=10.21.0.2
+KERNEL=/boot/efi/$(cat /etc/machine-id)/$(uname -r)/linux
+
+# Clients reach Galene and the TURN server at the board's wired address.
+wait_for 60 "br0 with an IPv4 lease" sh -c "ip -4 -o addr show br0 | grep -q inet"
+pub=$(ip -4 -o addr show br0 | awk '{print $4}' | cut -d/ -f1 | head -1)
+
+ip link del "$TAP" 2>/dev/null || true
+ip tuntap add dev "$TAP" mode tap
+ip addr add "$HOST_IP/30" dev "$TAP"
+ip link set "$TAP" up
+sysctl -q -w net.ipv4.ip_forward=1
+# the board's own addresses (no nft fib in this kernel), taken at VM start
+addrs=$(ip -4 -o addr show | awk '$2 != "lo" && $2 != "'"$TAP"'" { sub("/.*", "", $4); print $4 }' |
+	paste -sd, -)
+nft -f - <<NFT
+table ip ashen
+delete table ip ashen
+table ip ashen {
+	chain pre {
+		type nat hook prerouting priority dstnat; policy accept;
+		iifname != "$TAP" ip daddr { $addrs } tcp dport 443 dnat to $GUEST_IP:8443
+	}
+	chain out {
+		type nat hook output priority -100; policy accept;
+		ip daddr { $addrs } tcp dport 443 dnat to $GUEST_IP:8443
+	}
+	chain post {
+		type nat hook postrouting priority srcnat; policy accept;
+		ip saddr $GUEST_IP oifname != "$TAP" masquerade
+	}
+}
+NFT
+
+# Galene's ICE servers: the board's TURN, with a per-boot shared secret (coturn use-auth-secret).
+secret=$(cat /run/ashen/turn-secret)
+cat > "$ROOTFS/srv/galene/data/ice-servers.json" <<JSON
+[{"urls": ["turn:$pub:3478", "turn:$pub:3478?transport=tcp"],
+  "username": "galene", "credential": "$secret", "credentialType": "hmac-sha1"}]
+JSON
+chmod 600 "$ROOTFS/srv/galene/data/ice-servers.json"
+
+# crun reads the guest kernel's location from the container root; the host's Image is
+# bind-mounted there.
+mkdir -p "$ROOTFS/boot"
+echo '{"kernel_path": "/boot/Image", "kernel_format": 0}' > "$ROOTFS/.krun_vm.json"
+
+say "[5/7] starting Galene microVM (512 MiB guest RAM, all tagged secret)"
+# Host network namespace: crun opens the tap by name. podman's bridge network needs nft
+# features this kernel lacks.
+podman run --rm --replace --name ashen-galene --log-driver none \
+	--runtime /usr/local/lib/ashen/krun-crun/krun \
+	--network host --device /dev/net/tun -v "$KERNEL:/boot/Image:ro" \
+	--annotation krun.custom_kernel=1 --annotation krun.secret_memory=1 \
+	--annotation krun.ram_mib=512 --annotation krun.cpus=2 --annotation krun.tap_name="$TAP" \
+	--rootfs "$ROOTFS" /init "$(date +%s)" "$pub" 2>&1 |
+	while IFS= read -r line; do
+		# Narration goes to the console; Galene's own log lines only to the journal.
+		line=${line%$'\r'}
+		case "$line" in galene-vm:*) echo "<5>$line" > /dev/kmsg ;; esac
+		echo "$line"
+	done
