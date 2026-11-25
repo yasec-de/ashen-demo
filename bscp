@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# scp files to the demo board: bscp FILE... REMOTE_PATH
+set -euo pipefail
+DEMO=$(cd "$(dirname "$0")" && pwd)
+. "$DEMO/env.sh"
+(( $# >= 2 )) || { echo "usage: $0 FILE... REMOTE_PATH" >&2; exit 1; }
+H=$("$DEMO/bssh" --host)
+exec scp -q ${ASHEN_SSH_KEY:+-i "$ASHEN_SSH_KEY"} -o StrictHostKeyChecking=accept-new \
+	"${@:1:$#-1}" root@"$H":"${!#}"
